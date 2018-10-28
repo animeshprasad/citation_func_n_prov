@@ -1,0 +1,13 @@
+.idea/
+*.json
+*.pdf
+*.xml
+*.out
+*.meta
+*.pyc
+*.h5
+dataset.arff
+dataset_result.csv
+iteration_2_func_cnn/.venv/
+config/google_credentials.py
+

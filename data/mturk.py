@@ -1,0 +1,169 @@
+"""
+Script used to generate data for Amazon Mechanical Turk.
+"""
+import csv
+# import google as google
+import data as data
+import data_func as data_func
+import config.config as config
+import config.common as common
+import os
+
+delimiter = ','
+quotechar = '"'
+
+
+def write_to_csv(instances, writepath):
+    """
+    Write the given instances to the target CSV file. Format complies with the
+    requirements of CrowdFlower.
+    - Commented: 1st and 2nd rounds
+    - Uncommented: 3rd
+    """
+    with open(writepath, 'wb') as csvfile:
+        writer = csv.writer(csvfile, delimiter=delimiter, quotechar=quotechar,
+                            quoting=csv.QUOTE_MINIMAL)
+        # writer.writerow(
+        #     ['marker', 'article', 'previous', 'current', 'next', 'link'])
+        writer.writerow(
+            ['marker', 'article', 'context', 'provenance', 'link'])
+
+        for r in instances:
+            # article = r['article']
+            article = r['citing']
+            link = 'http://www.aclweb.org/anthology/%s/%s/%s.pdf' % (
+                article[0], article[0:3], article)
+
+            # rowdata = [r['marker'], article, r['context'][0], r['current'],
+            #            r['context'][2], link]
+            context = ' '.join(r['context'])
+            provenance = ' '.join(r['provenance'])
+            rowdata = [r['marker'], article, context, provenance, link]
+            writer.writerow(rowdata)
+
+
+def get_data():
+    """
+    Store the CSV file for use by MTurk.
+    """
+    filepath = config.ANNOTATION_MTURK_ARTICLES_FILEPATH_1
+    writepath = config.ANNOTATION_MTURK_FILEPATH_1
+
+    instances = []
+    with open(filepath, 'rb') as fp:
+        lines = fp.readlines()
+        lines = map(lambda x: x.strip(), lines)
+
+        for l in lines:
+            l_data = data.get_data(l)
+            print l
+            print len(instances)
+            if len(instances) + len(l_data) <= 1000:
+                instances += l_data
+            else:
+                break
+
+    write_to_csv(instances, writepath)
+
+
+def get_data_round2():
+    """
+    Store the CSV file for use by MTurk, for data collection round 2. This round
+    tweaks the proportion of classes by investigating sentiment distributions.
+    """
+    filepath = config.ANNOTATION_MTURK_ARTICLES_FILEPATH_2
+    writepath = config.ANNOTATION_MTURK_FILEPATH_2
+    keywords = common.func_bootstrapping_keywords
+
+    instances = []
+    with open(filepath, 'rb') as fp:
+        lines = fp.readlines()
+        lines = map(lambda x: x.strip(), lines)
+
+        for l in lines:
+            l_instances = []
+            dataset = data.get_data(l)
+            citing_sentences = set()
+
+            # Analyse sentiment
+            for d in dataset:
+                if d['current'] not in citing_sentences:
+                    score = google.get_sentiment(d['current']).sentiment.score
+                    if abs(score) >= 0.6:
+                        if score < 0:
+                            d['label'] = 'Weak'
+                        else:
+                            d['label'] = 'Pos'
+                        citing_sentences.add(d['current'])
+                        l_instances.append(d)
+
+            # Use cue words to classify the citations into particular classes
+            for label in keywords.keys():
+                words = keywords[label]
+                for w in words:
+                    w = w.lower()
+                    for d in dataset:
+                        if d['current'] not in citing_sentences and w in d[
+                            'current'].lower():
+                            d['label'] = label
+                            citing_sentences.add(d['current'])
+                            l_instances.append(d)
+
+            print l
+            print len(instances)
+            instances += l_instances
+
+    print instances
+    write_to_csv(instances, writepath)
+
+
+def parse_data(filename):
+    """
+    Parse the given file that is in the data folder. Return a list of data
+    instances.
+    """
+    directory = config.DATA_DIR
+    filepath = os.path.join(directory, filename)
+
+    instances = []
+    with open(filepath, 'rb') as csvfile:
+        reader = csv.reader(csvfile, delimiter=delimiter, quotechar=quotechar)
+        for row in reader:
+            if row[0] == 'HITID':
+                # Skip first row
+                continue
+            if row[-2] != 'no_agreement':
+                label = 'Neut'
+                if row[-2][0] == 'N':
+                    label = 'Neut'
+                elif row[-2][0] == 'W':
+                    label = 'Weak'
+                elif row[-2][0] == 'P':
+                    label = 'Pos'
+                elif row[-2][0] == 'C':
+                    label = 'CoCo'
+                item = {'marker': row[1], 'article': row[2], 'current': row[4],
+                        'context': [row[3], row[4], row[5]], 'label': label}
+                instances.append(item)
+    return instances
+
+
+def parse_data_crowdflower(filename):
+    """
+    Parse the CSV file generated by Crowdflower.
+    """
+    directory = config.DATA_DIR
+    filename = 'crowdflower/%s' % (filename)
+    filepath = os.path.join(directory, filename)
+
+    instances = []
+    with open(filepath, 'rb') as csvfile:
+        reader = csv.reader(csvfile, delimiter=delimiter, quotechar=quotechar)
+        for row in reader:
+            if row[0] == '_unit_id':
+                # Skip first row
+                continue
+            item = {'marker': row[10], 'article': row[7], 'current': row[8],
+                    'context': [row[12], row[8], row[11]], 'label': row[5]}
+            instances.append(item)
+    return instances
