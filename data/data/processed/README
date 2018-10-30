@@ -1,0 +1,28 @@
+README
+
+The datasets used in the paper are concatenation of train and test files. Why I had train and test files? Because initially I was planning to do train-test split, but later used 5-fold instead.
+
+Data format:
+{
+    "function": "Neut",
+    "cited": "C02-1025",
+    "citing": "P02-1061",
+
+    "provenance": ["Case and Zone of and : Similarly, if (or ) is initCaps, a feature (initCaps, zone) (or (initCaps, zone) ) is set to 1, etc.", "Token Information: This group consists of 10 features based on the string , as listed in Table 1."],
+    "label": "Prov", 
+    "context": ["", "More details of this mixed case NER and its performance are given in (Chieu and Ng, 2002).", ""],
+    "marker": "Chieu and Ng, 2002",
+
+    "vector": [5, 0, 0, 0.06711560552140244],
+    "vector_1": {"case": 1, "given": 1, "perform": 1, "detail": 1, "mix": 1, "ner": 1},
+    "vector_2": [0, 0.3285224531256613, 1, 1, 0, 0]
+}
+
+Notes:
+    "cited": the cited article ID
+    "citing": the citing article ID
+    "provenance": target provenance
+    "label": classification of the target provenance; Prov or Non-Prov
+    "function": classification of the citation context
+    "context": citation context; the citation we are investigating
+    "vector": all vectors are features used in baseline models

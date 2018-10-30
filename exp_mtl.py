@@ -1,52 +1,51 @@
-# New file authored 28 Jan 2018
-# For citation provenance
-# https://blog.keras.io/using-pre-trained-word-embeddings-in-a-keras-model.html
+#__author__ = "Xu Suan, and Animesh Prasad"
+#__copyright__ = "Copyright 2018, WING-NUS"
+#__email__ = "animesh@u.nus.edu"
+"""
+Experiments for MTL vs baselines on golden data.
+"""
+from __future__ import division, print_function
 
-"""
-Perform the experiments on bootstrapped data and actual annotated data.
-"""
-import lib.logger, os, sys, random, math
+import os, csv
 import numpy as np
-import pandas as pd
-import lib.utils as utils
-import lib.file_ops as file_ops
-import lib.embeddings as embeddings
+
 import config.config as config
 import data.data as data
-import data.data_func as data_func
 import sklearn.metrics as metrics
 from sklearn.model_selection import KFold
-
-# TODO Do not use sentiment features, as they don't seem very helpful
-# import data.google as google
-import data.mturk as mturk
-from sklearn.preprocessing import normalize
+import pandas as pd
 from sklearn.utils import class_weight
 
-import keras.backend as K
+
 from keras.utils import np_utils
 from keras.engine.topology import Input
-from keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, merge, \
-    GlobalMaxPooling1D, Merge, Embedding
-from keras.layers.convolutional import Convolution1D, MaxPooling1D
-from keras.models import Model, Sequential
+from keras.layers import Conv1D, Dense, \
+    GlobalMaxPooling1D, Merge, Embedding, Dropout, Masking
+from keras.layers.convolutional import Convolution1D
+from keras.models import Model
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
-
-"""
-Set random seed and fix bug on Dropout usage.
-"""
 import tensorflow as tf
 
+
+"""
+Seed for Replicablity.
+"""
 seed = 1027
 np.random.seed(seed)
-# tf.python.control_flow_ops = tf
 tf.set_random_seed(seed)
 
 MAX_NB_WORDS = 20000
 MAX_SEQUENCE_LENGTH = 50
 GLOVE_DIR = config.GLOVE_DIR
+GLOVE_FILE = 'glove.6B.100d.txt' # Note glove vector dimension should be same as that of embedding
 EMBEDDING_DIM = 100
+NO_FOLDS = 2
+
+
+NB_FILTER = 128 # When filter size is 256, both are better
+BATCH_SIZE = 32
+EPOCH = 20
 
 """
 Data reading and saving from disk (so that data processing is done only once).
@@ -64,6 +63,8 @@ golden_test = data.read_json_data(datafiles['golden_test'])
 dataset = filter(lambda x: x['function'] != 'Error', golden_train + golden_test)
 dataset_pos = filter(lambda x: x['label'] == 'Prov', dataset)
 dataset_neg = filter(lambda x: x['label'] == 'Non-Prov', dataset)
+
+print ('Provenance data has %d positive and %d negative samples' % (len(dataset_pos), len(dataset_neg)))
 # Provenance dataset end
 
 # Function dataset start
@@ -73,10 +74,10 @@ golden_test = data.read_json_data(datafiles['golden_test'])
 
 dataset_func = filter(lambda d: d['label'] != 'Error',
                       golden_train + golden_test)
-lendiff = len(dataset) - len(dataset_func)
-print lendiff
-dataset_func += random.sample(dataset_func, lendiff)
-# Function dataset end
+
+print ('Function data has %d samples' %  len(dataset_func))
+
+
 
 texts = map(lambda d: d['context'][1], dataset_func)
 texts_a_pos = map(lambda d: d['context'][1], dataset_pos)
@@ -127,7 +128,7 @@ xs_b_pos = pad_sequences(sequences_b_pos, maxlen=MAX_SEQUENCE_LENGTH)
 xs_a_neg = pad_sequences(sequences_a_neg, maxlen=MAX_SEQUENCE_LENGTH)
 xs_b_neg = pad_sequences(sequences_b_neg, maxlen=MAX_SEQUENCE_LENGTH)
 
-kf = KFold(n_splits=5)
+kf = KFold(n_splits=NO_FOLDS)
 
 y_pred_func_all = []
 y_test_func_all = []
@@ -139,7 +140,7 @@ y_pred_only_prov_all = []
 y_test_only_prov_all = []
 
 embeddings_index = {}
-f = open(os.path.join(GLOVE_DIR, 'glove.6B.100d.txt'))
+f = open(os.path.join(GLOVE_DIR, GLOVE_FILE))
 for line in f:
     values = line.split()
     word = values[0]
@@ -156,70 +157,55 @@ for word, i in word_index.items():
         # words not found in embedding index will be all-zeros.
         embedding_matrix[i] = embedding_vector
 
-# -------------------------
+
 texts = map(lambda d: d['context'][1], dataset_func)
 sequences = tokenizer.texts_to_sequences(texts)
 xs = pad_sequences(sequences, maxlen=MAX_SEQUENCE_LENGTH)
 ys = np_utils.to_categorical(np.asarray(ys))
 
-whole_dataset = dataset_func
-whole_dataset = dataset_pos + dataset_neg
 
-import csv
-with open('/Users/suxuan/Development/func_asdasdsmtl.csv', 'wb') as f:
-    csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-    csv_writer.writerow(['Citing', 'Actual', 'MTL'])
-    # csv_writer.writerow(['Citing', 'Target', 'Actual', 'MTL'])
+# --------------------------------------------------------------------------------------
 
-    # split the data into a training set and a validation set
-    index = -1
-    for train_index, test_index in (kf.split(xs_a_pos)):
-        index += 1
-        x_train_a = [xs_a_pos[j] for j in train_index]
-        x_train_b = [xs_b_pos[j] for j in train_index]
-        y_train_prov = [[1, 0] for j in train_index]
-        x_train_func = [xs[j] for j in train_index]
-        y_train_func = [ys[j] for j in train_index]
+with open('outfile_f.csv', 'wb') as f1, open('outfile_p.csv', 'wb') as f2:
+    csv_writer_f = csv.writer(f1, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    csv_writer_f.writerow(['Citing', 'Target', 'Actual', 'Baseline', 'MTL'])
+    csv_writer_p = csv.writer(f2, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+    csv_writer_p.writerow(['Citance', 'Actual', 'Baseline', 'MTL'])
 
-        for j in train_index:
+    # split the data into a training set and a test set for k-fold reporting
+    for func_split, prov_split in zip(kf.split(xs), kf.split(xs_a_pos)):
+        x_train_func = [xs[j] for j in func_split[0]]
+        y_train_func = [ys[j] for j in func_split[0]]
+        x_train_a = [xs_a_pos[j] for j in prov_split[0]]
+        x_train_b = [xs_b_pos[j] for j in prov_split[0]]
+        y_train_prov = [[1, 0] for j in prov_split[0]]
+
+        for j in prov_split[0]:
             negs = id2neg[j] if j in id2neg else []
             for neg in negs:
                 x_train_a.append(xs_a_neg[neg])
                 x_train_b.append(xs_b_neg[neg])
                 y_train_prov.append([0, 1])
 
-                func_index = neg + len(xs_a_pos)
-                x_train_func.append(xs[func_index])
-                y_train_func.append(ys[func_index])
-
         x_train_a = np.array(x_train_a)
         x_train_b = np.array(x_train_b)
+        y_train_prov = np.array(y_train_prov)
         x_train_func = np.array(x_train_func)
         y_train_func = np.array(y_train_func)
-        y_train_prov = np.array(y_train_prov)
 
-        print len(x_train_func)
-        print len(y_train_func)
 
-        x_test_a = [xs_a_pos[j] for j in test_index]
-        x_test_b = [xs_b_pos[j] for j in test_index]
-        y_test_prov = [[1, 0] for j in test_index]
-        x_test_func = [xs[j] for j in test_index]
-        y_test_func = [ys[j] for j in test_index]
+        x_test_func = [xs[j] for j in func_split[1]]
+        y_test_func = [ys[j] for j in func_split[1]]
+        x_test_a = [xs_a_pos[j] for j in prov_split[1]]
+        x_test_b = [xs_b_pos[j] for j in prov_split[1]]
+        y_test_prov = [[1, 0] for j in prov_split[1]]
 
-        all_test_indices = list(test_index)
-
-        for j in test_index:
+        for j in prov_split[1]:
             negs = id2neg[j] if j in id2neg else []
             for neg in negs:
-                x_test_a.append(xs_a_neg[neg])
+                x_test_a.append(xs_a_pos[j])
                 x_test_b.append(xs_b_neg[neg])
                 y_test_prov.append([0, 1])
-
-                func_index = neg + len(xs_a_pos)
-                x_test_func.append(xs[func_index])
-                y_test_func.append(ys[func_index])
-                all_test_indices.append(func_index)
 
         x_test_a = np.array(x_test_a)
         x_test_b = np.array(x_test_b)
@@ -227,203 +213,135 @@ with open('/Users/suxuan/Development/func_asdasdsmtl.csv', 'wb') as f:
         y_test_func = np.array(y_test_func)
         y_test_prov = np.array(y_test_prov)
 
-        # When filter size is 256, both are better
-        NB_FILTER = 256
-        print 'NB_FILTER'
-        print NB_FILTER
+        y_train_copy = map(lambda x: x.tolist().index(1), y_train_func)
+        weight_f = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
+        print('Applying function class weight' % weight_f)
 
-        BATCH_SIZE = 256
+        y_train_copy = map(lambda x: x.tolist().index(1), y_train_prov)
+        weight_p = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
+        print('Applying function class weight' % weight_p)
 
-        # Shared layers
-        shared_cnn_1 = Convolution1D(nb_filter=NB_FILTER,
-                                     filter_length=5,
-                                     border_mode='valid',
-                                     activation='relu')
-        shared_pooling_1 = MaxPooling1D(5)
-        shared_cnn_2 = Convolution1D(nb_filter=NB_FILTER,
-                                     filter_length=5,
-                                     border_mode='valid',
-                                     activation='relu')
-        shared_embedding = Embedding(len(word_index) + 1,
+        #print (x_test_a.shape, x_test_b.shape, x_test_func.shape, y_test_func.shape, y_test_prov.shape)
+        #print (x_train_a.shape, x_train_b.shape, x_train_func.shape, y_train_func.shape, y_train_prov.shape)
+
+        # ---------- Start of MTL ----------
+
+        embedding_layer1 = Embedding(len(word_index) + 1,
                                      EMBEDDING_DIM,
                                      weights=[embedding_matrix],
-                                     input_length=MAX_SEQUENCE_LENGTH)
-        # shared_embedding.trainable = False
-        # shared_dropout = Dropout(params.dropout_rate)
-        shared_pooling_2 = GlobalMaxPooling1D()
-        shared_dense = Dense(NB_FILTER, activation='relu')
+                                     input_length=MAX_SEQUENCE_LENGTH, trainable=False)
 
-        # Function
-        func_input = Input(shape=(MAX_SEQUENCE_LENGTH,))
-        func = shared_embedding(func_input)
-        func = shared_cnn_1(func)
-        # func = MaxPooling1D(5)(func)
-        # func = shared_cnn_2(func)
-        func = GlobalMaxPooling1D()(func)
-        func = shared_dense(func)
-        func_model = Dense(len(funcs_index), activation='softmax')(func)
+        sequence_input1 = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
+        mask1 = Masking(mask_value=0)(sequence_input1)
+        embedded_sequences1 = embedding_layer1(mask1)
+        x1 = Conv1D(NB_FILTER, 5, activation='relu')(embedded_sequences1)
+        xA = GlobalMaxPooling1D()(x1)
+        x1 = Dropout(Dense(32, activation='relu'))(xA)
 
-        # Provenance
-        prov_a_input = Input(shape=(MAX_SEQUENCE_LENGTH,))
-        # prov_a = Embedding(len(word_index) + 1,
-        #                              EMBEDDING_DIM,
-        #                              weights=[embedding_matrix],
-        #                              input_length=MAX_SEQUENCE_LENGTH)(prov_a_input)
-        # prov_a = Convolution1D(nb_filter=NB_FILTER,
-        #                              filter_length=5,
-        #                              border_mode='valid',
-        #                              activation='relu')(prov_a)
-        prov_a = shared_embedding(prov_a_input)
-        prov_a = shared_cnn_1(prov_a)
-        # prov_a = MaxPooling1D(5)(prov_a)
-        # prov_a = shared_cnn_2(prov_a)
-        prov_a = GlobalMaxPooling1D()(prov_a)
-        prov_a = shared_dense(prov_a)
-        # prov_a = Dense(NB_FILTER, activation='relu')(prov_a)
-
-        prov_b_input = Input(shape=(MAX_SEQUENCE_LENGTH,))
-        prov_b = Embedding(len(word_index) + 1,
+        embedding_layer2 = Embedding(len(word_index) + 1,
                                      EMBEDDING_DIM,
                                      weights=[embedding_matrix],
-                                     input_length=MAX_SEQUENCE_LENGTH)(prov_b_input)
-        prov_b = Convolution1D(nb_filter=NB_FILTER,
-                                     filter_length=5,
-                                     border_mode='valid',
-                                     activation='relu')(prov_b)
-        # prov_b = MaxPooling1D(5)(prov_b)
-        # prov_b = Convolution1D(nb_filter=128,
-        #                              filter_length=5,
-        #                              border_mode='valid',
-        #                              activation='relu')(prov_b)
-        prov_b = GlobalMaxPooling1D()(prov_b)
-        prov_b = Dense(NB_FILTER, activation='relu')(prov_b)
+                                     input_length=MAX_SEQUENCE_LENGTH, trainable=False)
 
-        # prov_b_input = Input(shape=(MAX_SEQUENCE_LENGTH,))
-        # prov_b = shared_embedding(prov_b_input)
-        # prov_b = shared_cnn_1(prov_b)
-        # # prov_b = MaxPooling1D(5)(prov_b)
-        # # prov_b = shared_cnn_2(prov_b)
-        # prov_b = GlobalMaxPooling1D()(prov_b)
-        # prov_b = shared_dense(prov_b)
+        sequence_input2 = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
+        mask2 = Masking(mask_value=0)(sequence_input2)
+        embedded_sequences2 = embedding_layer2(mask2)
+        x2 = Conv1D(NB_FILTER, 5, activation='relu')(embedded_sequences2)
+        x2 = GlobalMaxPooling1D()(x2)
+        x2 = Dropout(Dense(32, activation='relu'))(x2)
 
-        # prov_c = merge([prov_a, prov_b], mode='mul')
-        # prov = merge([prov_a, prov_b, prov_c], mode='concat')
-        prov = merge([prov_a, prov_b], mode='mul')
+        x = Merge(mode='mul')([x1, x2])
+        x = Merge(mode='concat')([x1, x2, x])
+        preds_p = Dense(2, activation='softmax')(x)
 
-        # prov = merge([prov_a, prov_b], mode='concat')
-        prov_model = Dense(len(provs_index), activation='softmax')(prov)
+        model2 = Model([sequence_input1, sequence_input2], preds_p)
 
-        # Combined model
-        model = Model(input=[func_input, prov_a_input, prov_b_input],
-                      output=[func_model, prov_model])
+        x = Dropout(Dense(32, activation='relu'))(xA)
+        preds_f = Dense(len(funcs_index), activation='softmax')(x)
 
-        model.compile(optimizer='rmsprop',
-                      loss='categorical_crossentropy',
+        model1 = Model(sequence_input1, preds_f)
+
+
+        model2.compile(loss='binary_crossentropy',
+                      optimizer='rmsprop',
                       metrics=['acc'])
 
-        print model.summary()
-        # print y_train.shape
 
-        # happy learning!
-        model.fit([x_train_func, x_train_a, x_train_b],
-                  [y_train_func, y_train_prov],
-                  nb_epoch=30, batch_size=BATCH_SIZE)
+        model1.compile(loss='categorical_crossentropy',
+                       optimizer='rmsprop',
+                       metrics=['acc'])
 
-        [y_pred_func, y_pred_prov] = model.predict(
-            [x_test_func, x_test_a, x_test_b])
+        print (model1.summary())
+        print (model2.summary())
+
+        count = 0
+        while count < EPOCH:
+            model2.fit([x_train_a, x_train_b], y_train_prov,
+                  nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_p)
+            model1.fit(x_train_func, y_train_func,
+                   nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_f)
+            count += 1
+
+        y_pred_func = model1.predict(
+            x_test_func)
+
+        y_pred_prov = model2.predict(
+            [x_test_a, x_test_b])
 
         y_pred_func = map(lambda x: pd.Series(x).idxmax(), y_pred_func)
         y_pred_prov = map(lambda x: pd.Series(x).idxmax(), y_pred_prov)
 
-        # Generate classification report
         y_test_func = data.compress_y(y_test_func)
         y_test_prov = data.compress_y(y_test_prov)
 
-        print whole_dataset[:2]
-        i_zero = 0
-        for i in all_test_indices:
-            row = [whole_dataset[i]['context'][1],
-                y_test_func[i_zero],
-                y_pred_func[i_zero],]
-            # row = [whole_dataset[i]['context'][1],
-            #     ' '.join(whole_dataset[i]['provenance']),
-            #     y_test_prov[i_zero],
-            #     y_pred_prov[i_zero],]
-            csv_writer.writerow(row)
-            i_zero += 1
-
-        print('y_pred_func')
-        print(y_pred_func)
-        print('y_test_func')
-        print(y_test_func)
+        # Generate classification report
+        print ('MTL_Func Classification Report')
+        print (metrics.classification_report(y_test_func, y_pred_func, digits=4))
+        print ('MTL_Prov Classification Report')
+        print (metrics.classification_report(y_test_prov, y_pred_prov, digits=4))
 
         y_pred_func_all += y_pred_func
         y_test_func_all += y_test_func
         y_pred_prov_all += y_pred_prov
         y_test_prov_all += y_test_prov
 
+        # ---------- End of MTL ----------
 
+        # ---------- Start of citation function ----------
 
-
-        continue
-
-        # ---------- Only citation function ----------
-        embedding_matrix = np.zeros((len(word_index) + 1, EMBEDDING_DIM))
-        for word, i in word_index.items():
-            embedding_vector = embeddings_index.get(word)
-            if embedding_vector is not None:
-                # words not found in embedding index will be all-zeros.
-                embedding_matrix[i] = embedding_vector
 
         embedding_layer = Embedding(len(word_index) + 1,
                                     EMBEDDING_DIM,
                                     weights=[embedding_matrix],
-                                    input_length=MAX_SEQUENCE_LENGTH)
+                                    input_length=MAX_SEQUENCE_LENGTH, trainable=False)
 
         sequence_input = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
-        embedded_sequences = embedding_layer(sequence_input)
+        mask = Masking(mask_value=0)(sequence_input)
+        embedded_sequences = embedding_layer(mask)
         x = Convolution1D(nb_filter=NB_FILTER,
                          filter_length=5,
-                         border_mode='valid',
                          activation='relu')(embedded_sequences)
-        # x = MaxPooling1D(5)(x)
-        # x = Conv1D(128, 5, activation='relu')(x)
-        # x = MaxPooling1D(5)(x)
-        # x = Flatten()(x)
-        # x = Dropout(0.1)(x)
-        # x = BatchNormalization()(x)
-        # x = Attention()(x)
         x = GlobalMaxPooling1D()(x)
-        x = Dense(NB_FILTER, activation='relu')(x)
-        # x = Dropout(0.5)(x)
-        # x = Bidirectional(GRU(128))(embedded_sequences)
-        # x = Dropout(0.1)(x)
+        x = Dropout(Dense(NB_FILTER, activation='relu'))(x)
         preds = Dense(len(funcs_index), activation='softmax')(x)
 
         model = Model(sequence_input, preds)
 
-        # model.layers[1].trainable = True
         model.compile(loss='categorical_crossentropy',
-                      # optimizer='adam',
                       optimizer='rmsprop',
                       metrics=['acc'])
+        print(model.summary())
 
-        y_train_copy = map(lambda x : x.tolist().index(1), y_train_func)
-        weight = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
-        print weight
         model.fit(x_train_func, y_train_func,
-                  nb_epoch=30, batch_size=BATCH_SIZE, class_weight=weight)
+                  nb_epoch=EPOCH, batch_size=BATCH_SIZE, class_weight=weight_f)
 
-        print model.summary()
         y_pred_probs = model.predict(x_test_func)
 
         y_pred_func = map(lambda x: pd.Series(x).idxmax(), y_pred_probs)
 
-        # Generate classification report
         y_test_func = data.compress_y(y_test_func)
-        print(y_pred_func)
-        print(y_test_func)
 
+        # Generate classification report
         y_pred_only_func_all += y_pred_func
         y_test_only_func_all += y_test_func
 
@@ -431,115 +349,64 @@ with open('/Users/suxuan/Development/func_asdasdsmtl.csv', 'wb') as f:
 
         # ---------- Start of citation provenance ----------
 
-        ax = Sequential()
-        ax.add(Embedding(len(word_index) + 1,
-                         EMBEDDING_DIM,
-                         weights=[embedding_matrix],
-                         input_length=MAX_SEQUENCE_LENGTH))
-        ax.add(Convolution1D(nb_filter=NB_FILTER,
-                             filter_length=5,
-                             border_mode='valid',
-                             activation='relu'))
-        ax.add(GlobalMaxPooling1D())
-        ax.add(Dense(NB_FILTER, activation='relu'))
+        embedding_layer1 = Embedding(len(word_index) + 1,
+                                     EMBEDDING_DIM,
+                                     weights=[embedding_matrix],
+                                     input_length=MAX_SEQUENCE_LENGTH, trainable=False)
 
-        bx = Sequential()
-        bx.add(Embedding(len(word_index) + 1,
-                         EMBEDDING_DIM,
-                         weights=[embedding_matrix],
-                         input_length=MAX_SEQUENCE_LENGTH))
-        bx.add(Convolution1D(nb_filter=NB_FILTER,
-                             filter_length=5,
-                             border_mode='valid',
-                             activation='relu'))
-        bx.add(GlobalMaxPooling1D())
-        bx.add(Dense(NB_FILTER, activation='relu'))
+        sequence_input1 = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
+        mask1 = Masking(mask_value=0)(sequence_input1)
+        embedded_sequences1 = embedding_layer1(mask1)
+        x1 = Conv1D(NB_FILTER, 5, activation='relu')(embedded_sequences1)
+        x1 = GlobalMaxPooling1D()(x1)
+        x1 = Dropout(Dense(32, activation='relu'))(x1)
 
-        # embedding_layer = Embedding(len(word_index) + 1,
-        #                             EMBEDDING_DIM,
-        #                             weights=[embedding_matrix],
-        #                             input_length=MAX_SEQUENCE_LENGTH)
+        embedding_layer2 = Embedding(len(word_index) + 1,
+                                     EMBEDDING_DIM,
+                                     weights=[embedding_matrix],
+                                     input_length=MAX_SEQUENCE_LENGTH)
 
-        # asequence_input = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
-        # asequence_input = Sequential()
-        # aembedded_sequences = embedding_layer(asequence_input)
-        # ax = Conv1D(128, 5, activation='relu')(aembedded_sequences)
-        # ax = MaxPooling1D(5)(ax)
-        # ax = Conv1D(128, 5, activation='relu')(ax)
-        # # ax = MaxPooling1D(5)(ax)
-        # # ax = Flatten()(ax)
-        # ax = GlobalMaxPooling1D()(ax)
-        # ax = Dense(128, activation='relu')(ax)
+        sequence_input2 = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
+        mask2 = Masking(mask_value=0)(sequence_input2)
+        embedded_sequences2 = embedding_layer2(mask2)
+        x2 = Conv1D(NB_FILTER, 5, activation='relu')(embedded_sequences2)
+        x2 = GlobalMaxPooling1D()(x2)
+        x2 = Dropout(Dense(32, activation='relu'))(x2)
 
-        # bsequence_input = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
-        # bembedded_sequences = embedding_layer(bsequence_input)
-        # bx = Conv1D(128, 5, activation='relu')(bembedded_sequences)
-        # bx = MaxPooling1D(5)(bx)
-        # bx = Conv1D(128, 5, activation='relu')(bx)
-        # # bx = MaxPooling1D(5)(bx)
-        # # bx = Flatten()(bx)
-        # bx = GlobalMaxPooling1D()(bx)
-        # bx = Dense(128, activation='relu')(bx)
+        x = Merge(mode='mul')([x1, x2])
+        x = Merge(mode='concat')([x1, x2, x])
+        preds_p = Dense(2, activation='softmax')(x)
 
-        # seq_features = merge([ax, bx], mode='concat')
-        # # seq_features = Dense(128, activation='relu')(seq_features)
-        # preds = Dense(len(ys_index), activation='softmax')(seq_features)
+        model = Model([sequence_input1, sequence_input2], preds_p)
 
-        # model = Model(inputs=[asequence_input, bsequence_input], outputs=preds)
-        # model.compile(loss='categorical_crossentropy',
-        #               optimizer='rmsprop',
-        #               metrics=['acc'])
-
-
-        model = Sequential()
-        model.add(Merge([ax, bx], mode='concat'))
-        # model.add(Dense(len(ys_index), activation='softmax'))
-        model.add(Dense(2, activation='softmax'))
-
-        model.compile(loss='binary_crossentropy',
+        model.compile(loss='categorical_crossentropy',
                       optimizer='rmsprop',
                       metrics=['acc'])
+        print (model.summary())
 
-        print model.summary()
-        # print y_train.shape
-
-        # happy learning!
         model.fit([x_train_a, x_train_b], y_train_prov,
-                  nb_epoch=30, batch_size=BATCH_SIZE)
+                  nb_epoch=EPOCH, batch_size=BATCH_SIZE, class_weight=weight_p)
+
 
         y_pred_probs = model.predict([x_test_a, x_test_b])
 
-        import pandas as pd
-
         y_pred_prov = map(lambda x: pd.Series(x).idxmax(), y_pred_probs)
 
-        # Generate classification report
         y_test_prov = data.compress_y(y_test_prov)
 
+        # Generate classification report
         y_pred_only_prov_all += y_pred_prov
         y_test_only_prov_all += y_test_prov
 
         # ---------- End of citation provenance ----------
 
-    # Aggregate the results and print report
 
-    # results = metrics.precision_recall_fscore_support(y_test, y_pred)
-    # ans = []
-    # for c in range(0, 4):
-    #     for res in results[:-1]:
-    #         ans += res[c]
+    print ('MTL_Func')
+    print (metrics.classification_report(y_test_func_all, y_pred_func_all, digits=4))
+    print ('MTL_Prov')
+    print (metrics.classification_report(y_test_prov_all, y_pred_prov_all, digits=4))
+    print ('Plain_Func')
+    print (metrics.classification_report(y_test_only_func_all, y_pred_only_func_all, digits=4))
+    print ('Plain_Prov')
+    print (metrics.classification_report(y_test_only_prov_all, y_pred_only_prov_all, digits=4))
 
-    print 'MTL_Func'
-    print metrics.classification_report(y_test_func_all, y_pred_func_all, digits=4)
-    print 'MTL_Prov'
-    print metrics.classification_report(y_test_prov_all, y_pred_prov_all, digits=4)
-    print 'Plain_Func'
-    print metrics.classification_report(y_test_only_func_all, y_pred_only_func_all, digits=4)
-    print 'Plain_Prov'
-    print metrics.classification_report(y_test_only_prov_all, y_pred_only_prov_all, digits=4)
-
-    # ans += [metrics.precision_score(y_test, y_pred, average='weighted'),
-    #         metrics.recall_score(y_test, y_pred, average='weighted'),
-    #         metrics.f1_score(y_test, y_pred, average='weighted')]
-
-    # print ans
