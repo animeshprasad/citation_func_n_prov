@@ -60,7 +60,8 @@ dataset = filter(lambda x: x['function'] != 'Error', golden_train + golden_test)
 dataset_pos = filter(lambda x: x['label'] == 'Prov', dataset)
 dataset_neg = filter(lambda x: x['label'] == 'Non-Prov', dataset)
 
-print len(dataset_pos), len(dataset_neg)
+print (len(dataset), len(dataset_pos), len(dataset_neg))
+
 
 # Provenance dataset end
 
@@ -74,6 +75,7 @@ dataset_func = filter(lambda d: d['label'] != 'Error',
 
 
 print (len(dataset), len(dataset_func))
+
 
 #lendiff = len(dataset) - len(dataset_func)
 #print lendiff
@@ -170,7 +172,7 @@ ys = np_utils.to_categorical(np.asarray(ys))
 #whole_dataset = dataset_pos + dataset_neg
 
 import csv
-print (id2neg)
+#print (id2neg)
 with open('outfile.csv', 'wb') as f:
     csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     csv_writer.writerow(['Citing', 'Actual', 'MTL'])
@@ -184,8 +186,8 @@ with open('outfile.csv', 'wb') as f:
         x_train_b = [xs_b_pos[j] for j in prov_split[0]]
         y_train_prov = [[1, 0] for j in prov_split[0]]
 
-        print (len(prov_split[0]))
-        print ('----->')
+        #print (len(prov_split[0]))
+        #print ('----->')
 
         ka = 0
         pa =0
@@ -203,7 +205,7 @@ with open('outfile.csv', 'wb') as f:
                 y_train_prov.append([0, 1])
 
 
-        print (ka, pa)
+        #print (ka, pa)
 
 
         x_train_a = np.array(x_train_a)
@@ -222,11 +224,11 @@ with open('outfile.csv', 'wb') as f:
         x_test_b = [xs_b_pos[j] for j in prov_split[1]]
         y_test_prov = [[1, 0] for j in prov_split[1]]
 
-        print (len(prov_split[1]))
-        print ('----->')
+        #print (len(prov_split[1]))
+        #print ('----->')
 
         ka = 0
-        pa =0
+        pa = 0
         for j in prov_split[1]:
             negs = id2neg[j] if j in id2neg else []
             if negs == []:
@@ -238,7 +240,7 @@ with open('outfile.csv', 'wb') as f:
                 x_test_b.append(xs_b_neg[neg])
                 y_test_prov.append([0, 1])
 
-        print (ka, pa)
+        #print (ka, pa)
 
 
 
@@ -259,8 +261,8 @@ with open('outfile.csv', 'wb') as f:
 
         # When filter size is 256, both are better
         NB_FILTER = 128
-        print 'NB_FILTER'
-        print NB_FILTER
+        #print 'NB_FILTER'
+        #print NB_FILTER
 
         BATCH_SIZE = 32
 
@@ -272,10 +274,10 @@ with open('outfile.csv', 'wb') as f:
         sequence_input1 = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
         mask1 = Masking(mask_value=0)(sequence_input1)
         embedded_sequences1 = embedding_layer1(mask1)
-        x1 = Conv1D(128, 5, activation='relu')(embedded_sequences1)
+        x1 = Conv1D(128, 5, border_mode='valid', activation='relu')(embedded_sequences1)
 
         xA = GlobalMaxPooling1D()(x1)
-        x1 = Dropout(Dense(32, activation='relu'))(xA)
+        x1 = Dropout(Dense(128, activation='relu'))(xA)
 
         embedding_layer2 = Embedding(len(word_index) + 1,
                                      EMBEDDING_DIM,
@@ -285,10 +287,10 @@ with open('outfile.csv', 'wb') as f:
         sequence_input2 = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
         mask2 = Masking(mask_value=0)(sequence_input2)
         embedded_sequences2 = embedding_layer2(mask2)
-        x2 = Conv1D(128, 5, activation='relu')(embedded_sequences2)
+        x2 = Conv1D(128, 5, border_mode='valid', activation='relu')(embedded_sequences2)
 
         x2 = GlobalMaxPooling1D()(x2)
-        x2 = Dropout(Dense(32, activation='relu'))(x2)
+        x2 = Dropout(Dense(128, activation='relu'))(x2)
 
         x = Merge(mode='mul')([x1, x2])
         x = Merge(mode='concat')([x1, x2, x])
@@ -405,7 +407,7 @@ with open('outfile.csv', 'wb') as f:
 
 
         count = 0
-        EPOCH = 30
+        EPOCH = 20
         indices= []
         indices_type = []
         for i in range((x_train_func.shape[0])/BATCH_SIZE):
@@ -415,18 +417,18 @@ with open('outfile.csv', 'wb') as f:
             indices.append((i * BATCH_SIZE, min((i + 1) * BATCH_SIZE, x_train_a.shape[0])))
             indices_type.append(1)
 
-        print (indices)
+        #print (indices)
 
 
         y_train_copy = map(lambda x: x.tolist().index(1), y_train_func)
         weight_f = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
-        print weight_f
+        #print weight_f
 
         y_train_copy = map(lambda x: x.tolist().index(1), y_train_prov)
         weight_p = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
-        print weight_p
-        for i in [0, 1]:
-            weight_p[i] = weight_p[i]*weight_p[i]
+        #print weight_p
+        # for i in [0, 1]:
+        #     weight_p[i] = weight_p[i]*weight_p[i]
 
 
 
@@ -469,7 +471,7 @@ with open('outfile.csv', 'wb') as f:
         #             loss_prov += loss2[0]*x_train_ab.shape[0]
         #             loss_prov_acc += loss2[1]*x_train_ab.shape[0]
 
-            print ( map(lambda x: pd.Series(x).idxmax(),model2.predict([x_test_a, x_test_b])))
+         #   print ( map(lambda x: pd.Series(x).idxmax(),model2.predict([x_test_a, x_test_b])))
          #   count = count + 1
 
             #print ('Func: loss is ', loss_func/x_train_func.shape[0], ', acc is ', loss_func_acc /x_train_func.shape[0] )
@@ -512,18 +514,18 @@ with open('outfile.csv', 'wb') as f:
         #     csv_writer.writerow(row)
         #     i_zero += 1
 
-        print('y_pred_prov')
-        print(y_pred_prov)
-        print('y_test_prov')
-        print(y_test_prov)
+        #print('y_pred_prov')
+        #print(y_pred_prov)
+        #print('y_test_prov')
+        #print(y_test_prov)
 
         #print('y_pred_func')
         #print(y_pred_func)
-        print('y_test_func')
-        print(y_test_func)
+        #print('y_test_func')
+        #print(y_test_func)
         #raw_input()
 
-        #y_pred_func_all += y_pred_func
+        y_pred_func_all += y_pred_func
         y_test_func_all += y_test_func
         y_pred_prov_all += y_pred_prov
         y_test_prov_all += y_test_prov
@@ -583,8 +585,8 @@ with open('outfile.csv', 'wb') as f:
         # Generate classification report
         y_test_func = data.compress_y(y_test_func)
 
-        print('y_pred_func_A')
-        print(y_pred_func)
+        #print('y_pred_func_A')
+        #print(y_pred_func)
 
 
         y_pred_only_func_all += y_pred_func
@@ -706,7 +708,7 @@ with open('outfile.csv', 'wb') as f:
                     # loss_prov += loss2[0]*x_train_ab.shape[0]
                     # loss_prov_acc += loss2[1]*x_train_ab.shape[0]
 
-            print ( map(lambda x: pd.Series(x).idxmax(), model.predict([x_test_a, x_test_b])))
+            #print ( map(lambda x: pd.Series(x).idxmax(), model.predict([x_test_a, x_test_b])))
             count +=1
 
 
@@ -720,9 +722,9 @@ with open('outfile.csv', 'wb') as f:
         # Generate classification report
         y_test_prov = data.compress_y(y_test_prov)
 
-        print('y_pred_prov_B')
-        print(y_pred_prov)
-        raw_input()
+        #print('y_pred_prov_B')
+        #rint(y_pred_prov)
+        #raw_input()
 
         y_pred_only_prov_all += y_pred_prov
         y_test_only_prov_all += y_test_prov
@@ -737,8 +739,8 @@ with open('outfile.csv', 'wb') as f:
     #     for res in results[:-1]:
     #         ans += res[c]
 
-    #print 'MTL_Func'
-    #print metrics.classification_report(y_test_func_all, y_pred_func_all, digits=4)
+    print 'MTL_Func'
+    print metrics.classification_report(y_test_func_all, y_pred_func_all, digits=4)
     print 'MTL_Prov'
     print metrics.classification_report(y_test_prov_all, y_pred_prov_all, digits=4)
     print 'Plain_Func'
