@@ -5,23 +5,28 @@
 """
 Perform the experiments on bootstrapped data and actual annotated data.
 """
-import os
-
+import lib.logger, os, sys, random, math
 import numpy as np
-import pandas as pd
-import sklearn.metrics as metrics
-from keras.engine.topology import Input
-from keras.layers import Conv1D, Dense, GlobalMaxPooling1D, Merge, Embedding, Dropout, Masking
-from keras.layers.convolutional import Convolution1D
-from keras.models import Model, Sequential
-from keras.preprocessing.sequence import pad_sequences
-from keras.preprocessing.text import Tokenizer
-from keras.utils import np_utils
-from sklearn.model_selection import KFold
-from sklearn.utils import class_weight
 
 import config.config as config
 import data.data as data
+import data.data_func as data_func
+import sklearn.metrics as metrics
+from sklearn.model_selection import KFold
+import pandas as pd
+from tensorflow.python import debug as tf_debug
+
+from sklearn.utils import class_weight
+
+import keras.backend as K
+from keras.utils import np_utils
+from keras.engine.topology import Input
+from keras.layers import Conv1D, MaxPooling1D, Flatten, Dense, merge, \
+    GlobalMaxPooling1D, Merge, Embedding, Dropout, Masking
+from keras.layers.convolutional import Convolution1D, MaxPooling1D
+from keras.models import Model, Sequential
+from keras.preprocessing.text import Tokenizer
+from keras.preprocessing.sequence import pad_sequences
 
 """
 Set random seed and fix bug on Dropout usage.
@@ -55,7 +60,8 @@ dataset = filter(lambda x: x['function'] != 'Error', golden_train + golden_test)
 dataset_pos = filter(lambda x: x['label'] == 'Prov', dataset)
 dataset_neg = filter(lambda x: x['label'] == 'Non-Prov', dataset)
 
-print(len(dataset), len(dataset_pos), len(dataset_neg))
+print (len(dataset), len(dataset_pos), len(dataset_neg))
+
 
 # Provenance dataset end
 
@@ -67,12 +73,15 @@ golden_test = data.read_json_data(datafiles['golden_test'])
 dataset_func = filter(lambda d: d['label'] != 'Error',
                       golden_train + golden_test)
 
-print(len(dataset), len(dataset_func))
 
-# lendiff = len(dataset) - len(dataset_func)
-# print lendiff
-# dataset_func += random.sample(dataset_func, lendiff)
+print (len(dataset), len(dataset_func))
+
+
+#lendiff = len(dataset) - len(dataset_func)
+#print lendiff
+#dataset_func += random.sample(dataset_func, lendiff)
 # Function dataset end
+
 
 
 texts = map(lambda d: d['context'][1], dataset_func)
@@ -159,12 +168,11 @@ sequences = tokenizer.texts_to_sequences(texts)
 xs = pad_sequences(sequences, maxlen=MAX_SEQUENCE_LENGTH)
 ys = np_utils.to_categorical(np.asarray(ys))
 
-# whole_dataset = dataset_func
-# whole_dataset = dataset_pos + dataset_neg
+#whole_dataset = dataset_func
+#whole_dataset = dataset_pos + dataset_neg
 
 import csv
-
-# print (id2neg)
+#print (id2neg)
 with open('outfile.csv', 'wb') as f:
     csv_writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     csv_writer.writerow(['Citing', 'Actual', 'MTL'])
@@ -178,8 +186,11 @@ with open('outfile.csv', 'wb') as f:
         x_train_b = [xs_b_pos[j] for j in prov_split[0]]
         y_train_prov = [[1, 0] for j in prov_split[0]]
 
+        #print (len(prov_split[0]))
+        #print ('----->')
+
         ka = 0
-        pa = 0
+        pa =0
         for j in prov_split[0]:
             negs = id2neg[j] if j in id2neg else []
             if negs == []:
@@ -188,10 +199,14 @@ with open('outfile.csv', 'wb') as f:
                 pa += 1
             for neg in negs:
                 x_train_a.append(xs_a_neg[neg])
-                # print (xs_a_neg[id2neg[ka[0]]][0])
+                #print (xs_a_neg[id2neg[ka[0]]][0])
                 x_train_b.append(xs_b_neg[neg])
-                # print (xs_b_neg[id2neg[ka[0]]][0])
+                #print (xs_b_neg[id2neg[ka[0]]][0])
                 y_train_prov.append([0, 1])
+
+
+        #print (ka, pa)
+
 
         x_train_a = np.array(x_train_a)
         x_train_b = np.array(x_train_b)
@@ -199,11 +214,18 @@ with open('outfile.csv', 'wb') as f:
         x_train_func = np.array(x_train_func)
         y_train_func = np.array(y_train_func)
 
+
+        #print len(x_train_func)
+        #print len(y_train_func)
+
         x_test_func = [xs[j] for j in func_split[1]]
         y_test_func = [ys[j] for j in func_split[1]]
         x_test_a = [xs_a_pos[j] for j in prov_split[1]]
         x_test_b = [xs_b_pos[j] for j in prov_split[1]]
         y_test_prov = [[1, 0] for j in prov_split[1]]
+
+        #print (len(prov_split[1]))
+        #print ('----->')
 
         ka = 0
         pa = 0
@@ -218,13 +240,16 @@ with open('outfile.csv', 'wb') as f:
                 x_test_b.append(xs_b_neg[neg])
                 y_test_prov.append([0, 1])
 
-        # print (ka, pa)
+        #print (ka, pa)
+
+
 
         x_test_a = np.array(x_test_a)
         x_test_b = np.array(x_test_b)
         x_test_func = np.array(x_test_func)
         y_test_func = np.array(y_test_func)
         y_test_prov = np.array(y_test_prov)
+
 
         print (x_test_a.shape, x_test_b.shape, x_test_func.shape, y_test_func.shape, y_test_prov.shape)
         print (x_train_a.shape, x_train_b.shape, x_train_func.shape, y_train_func.shape, y_train_prov.shape)
@@ -233,10 +258,11 @@ with open('outfile.csv', 'wb') as f:
         # sess = tf_debug.LocalCLIDebugWrapperSession(sess)
         # K.set_session(sess)
 
+
         # When filter size is 256, both are better
         NB_FILTER = 128
-        # print 'NB_FILTER'
-        # print NB_FILTER
+        #print 'NB_FILTER'
+        #print NB_FILTER
 
         BATCH_SIZE = 32
 
@@ -272,6 +298,8 @@ with open('outfile.csv', 'wb') as f:
 
         model2 = Model([sequence_input1, sequence_input2], preds_p)
 
+
+
         x = Dense(NB_FILTER, activation='relu')(xA)
         # # x = Dropout(0.5)(x)
         # # x = Bidirectional(GRU(128))(embedded_sequences)
@@ -280,14 +308,19 @@ with open('outfile.csv', 'wb') as f:
 
         model1 = Model(sequence_input1, preds_f)
 
+
         model2.compile(loss='binary_crossentropy',
-                       optimizer='rmsprop',
-                       metrics=['acc'])
+                      optimizer='rmsprop',
+                      metrics=['acc'])
+
 
         model1.compile(loss='categorical_crossentropy',
                        # optimizer='adam',
                        optimizer='rmsprop',
                        metrics=['acc'])
+
+
+
 
         # # Shared layers
         # shared_cnn_1 = Convolution1D(nb_filter=NB_FILTER,
@@ -368,40 +401,46 @@ with open('outfile.csv', 'wb') as f:
         #               loss='categorical_crossentropy',
         #               metrics=['acc'])
 
-        print(model1.summary())
-        print(model2.summary())
+        print model1.summary()
+        print model2.summary()
         # print y_train.shape
+
 
         count = 0
         EPOCH = 20
-        indices = []
+        indices= []
         indices_type = []
-        for i in range((x_train_func.shape[0]) / BATCH_SIZE):
-            indices.append((i * BATCH_SIZE, min((i + 1) * BATCH_SIZE, x_train_func.shape[0])))
+        for i in range((x_train_func.shape[0])/BATCH_SIZE):
+            indices.append((i*BATCH_SIZE, min((i+1)*BATCH_SIZE, x_train_func.shape[0])))
             indices_type.append(0)
         for i in range((x_train_a.shape[0]) / BATCH_SIZE):
             indices.append((i * BATCH_SIZE, min((i + 1) * BATCH_SIZE, x_train_a.shape[0])))
             indices_type.append(1)
 
-        # print (indices)
+        #print (indices)
+
 
         y_train_copy = map(lambda x: x.tolist().index(1), y_train_func)
         weight_f = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
-        # print weight_f
+        #print weight_f
 
         y_train_copy = map(lambda x: x.tolist().index(1), y_train_prov)
         weight_p = class_weight.compute_class_weight('balanced', np.unique(y_train_copy), y_train_copy)
-        # print weight_p
+        #print weight_p
         # for i in [0, 1]:
         #     weight_p[i] = weight_p[i]*weight_p[i]
 
+
+
         while count < EPOCH:
+
             model2.fit([x_train_a, x_train_b], y_train_prov,
-                       nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_p)
+                  nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_p)
             model1.fit(x_train_func, y_train_func,
-                       nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_f)
+                   nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_f)
 
             count += 1
+
 
         # # happy learning!
         #     loss_func_acc = 0
@@ -432,17 +471,21 @@ with open('outfile.csv', 'wb') as f:
         #             loss_prov += loss2[0]*x_train_ab.shape[0]
         #             loss_prov_acc += loss2[1]*x_train_ab.shape[0]
 
-        #   print ( map(lambda x: pd.Series(x).idxmax(),model2.predict([x_test_a, x_test_b])))
-        #   count = count + 1
+         #   print ( map(lambda x: pd.Series(x).idxmax(),model2.predict([x_test_a, x_test_b])))
+         #   count = count + 1
 
-        # print ('Func: loss is ', loss_func/x_train_func.shape[0], ', acc is ', loss_func_acc /x_train_func.shape[0] )
-        # print ('Prov: loss is ',loss_prov/x_train_a.shape[0], ', acc is ', loss_prov_acc /x_train_a.shape[0])
+            #print ('Func: loss is ', loss_func/x_train_func.shape[0], ', acc is ', loss_func_acc /x_train_func.shape[0] )
+            #print ('Prov: loss is ',loss_prov/x_train_a.shape[0], ', acc is ', loss_prov_acc /x_train_a.shape[0])
+
+
 
         y_pred_func = model1.predict(
             x_test_func)
 
         y_pred_prov = model2.predict(
             [x_test_a, x_test_b])
+
+
 
         y_pred_func = map(lambda x: pd.Series(x).idxmax(), y_pred_func)
         y_pred_prov = map(lambda x: pd.Series(x).idxmax(), y_pred_prov)
@@ -451,10 +494,12 @@ with open('outfile.csv', 'wb') as f:
         y_test_func = data.compress_y(y_test_func)
         y_test_prov = data.compress_y(y_test_prov)
 
-        print('MTL_Func')
-        print(metrics.classification_report(y_test_func, y_pred_func, digits=4))
-        print('MTL_Prov')
-        print(metrics.classification_report(y_test_prov, y_pred_prov, digits=4))
+        print 'MTL_Func'
+        print metrics.classification_report(y_test_func, y_pred_func, digits=4)
+        print 'MTL_Prov'
+        print metrics.classification_report(y_test_prov, y_pred_prov, digits=4)
+
+
 
         # print whole_dataset[:2]
         # i_zero = 0
@@ -469,21 +514,23 @@ with open('outfile.csv', 'wb') as f:
         #     csv_writer.writerow(row)
         #     i_zero += 1
 
-        # print('y_pred_prov')
-        # print(y_pred_prov)
-        # print('y_test_prov')
-        # print(y_test_prov)
+        #print('y_pred_prov')
+        #print(y_pred_prov)
+        #print('y_test_prov')
+        #print(y_test_prov)
 
-        # print('y_pred_func')
-        # print(y_pred_func)
-        # print('y_test_func')
-        # print(y_test_func)
-        # raw_input()
+        #print('y_pred_func')
+        #print(y_pred_func)
+        #print('y_test_func')
+        #print(y_test_func)
+        #raw_input()
 
         y_pred_func_all += y_pred_func
         y_test_func_all += y_test_func
         y_pred_prov_all += y_pred_prov
         y_test_prov_all += y_test_prov
+
+
 
         # ---------- Only citation function ----------
         embedding_matrix = np.zeros((len(word_index) + 1, EMBEDDING_DIM))
@@ -501,9 +548,9 @@ with open('outfile.csv', 'wb') as f:
         sequence_input = Input(shape=(MAX_SEQUENCE_LENGTH,), dtype='int32')
         embedded_sequences = embedding_layer(sequence_input)
         x = Convolution1D(nb_filter=NB_FILTER,
-                          filter_length=5,
-                          border_mode='valid',
-                          activation='relu')(embedded_sequences)
+                         filter_length=5,
+                         border_mode='valid',
+                         activation='relu')(embedded_sequences)
         # x = MaxPooling1D(5)(x)
         # x = Conv1D(128, 5, activation='relu')(x)
         # x = MaxPooling1D(5)(x)
@@ -526,10 +573,11 @@ with open('outfile.csv', 'wb') as f:
                       optimizer='rmsprop',
                       metrics=['acc'])
 
+
         model.fit(x_train_func, y_train_func,
                   nb_epoch=EPOCH, batch_size=BATCH_SIZE, class_weight=weight_f)
 
-        print(model.summary())
+        print model.summary()
         y_pred_probs = model.predict(x_test_func)
 
         y_pred_func = map(lambda x: pd.Series(x).idxmax(), y_pred_probs)
@@ -537,8 +585,9 @@ with open('outfile.csv', 'wb') as f:
         # Generate classification report
         y_test_func = data.compress_y(y_test_func)
 
-        # print('y_pred_func_A')
-        # print(y_pred_func)
+        #print('y_pred_func_A')
+        #print(y_pred_func)
+
 
         y_pred_only_func_all += y_pred_func
         y_test_only_func_all += y_test_func
@@ -617,25 +666,27 @@ with open('outfile.csv', 'wb') as f:
                       optimizer='rmsprop',
                       metrics=['acc'])
 
-        print(model.summary())
+        print model.summary()
         # print y_train.shape
 
         # happy learning!
         count = 0
         while count < EPOCH:
             model.fit([x_train_a, x_train_b], y_train_prov,
-                      nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_p)
+                  nb_epoch=1, batch_size=BATCH_SIZE, class_weight=weight_p)
             count += 1
 
-        count = 0
+
+
+        count  = 0
         while count < EPOCH:
-            # happy learning!
+        # happy learning!
             loss_func_acc = 0
             loss_func = 0
-            loss_prov_acc = 0
+            loss_prov_acc= 0
             loss_prov = 0
-            for i in range(len(indices)):
-                # if indices_type[i] == 0:
+            for i in  range(len(indices)):
+                #if indices_type[i] == 0:
                 #    x_train_funcb = x_train_func[indices[i][0]: indices[i][1]]
                 #    y_train_funcb = y_train_func[indices[i][0]: indices[i][1]]
                 #    #print ('Training func')
@@ -644,6 +695,7 @@ with open('outfile.csv', 'wb') as f:
                 #    #print (loss1)
                 #    loss_func += loss1[0]*x_train_funcb.shape[0]
                 #    loss_func_acc += loss1[1]*x_train_funcb.shape[0]
+
 
                 if indices_type[i] == 1:
                     x_train_ab = x_train_a[indices[i][0]: indices[i][1]]
@@ -656,19 +708,23 @@ with open('outfile.csv', 'wb') as f:
                     # loss_prov += loss2[0]*x_train_ab.shape[0]
                     # loss_prov_acc += loss2[1]*x_train_ab.shape[0]
 
-            # print ( map(lambda x: pd.Series(x).idxmax(), model.predict([x_test_a, x_test_b])))
-            count += 1
+            #print ( map(lambda x: pd.Series(x).idxmax(), model.predict([x_test_a, x_test_b])))
+            count +=1
+
+
 
         y_pred_probs = model.predict([x_test_a, x_test_b])
+
+
 
         y_pred_prov = map(lambda x: pd.Series(x).idxmax(), y_pred_probs)
 
         # Generate classification report
         y_test_prov = data.compress_y(y_test_prov)
 
-        # print('y_pred_prov_B')
-        # rint(y_pred_prov)
-        # raw_input()
+        #print('y_pred_prov_B')
+        #rint(y_pred_prov)
+        #raw_input()
 
         y_pred_only_prov_all += y_pred_prov
         y_test_only_prov_all += y_test_prov
@@ -683,14 +739,14 @@ with open('outfile.csv', 'wb') as f:
     #     for res in results[:-1]:
     #         ans += res[c]
 
-    print('MTL_Func')
-    print(metrics.classification_report(y_test_func_all, y_pred_func_all, digits=4))
-    print('MTL_Prov')
-    print(metrics.classification_report(y_test_prov_all, y_pred_prov_all, digits=4))
-    print('Plain_Func')
-    print(metrics.classification_report(y_test_only_func_all, y_pred_only_func_all, digits=4))
-    print('Plain_Prov')
-    print(metrics.classification_report(y_test_only_prov_all, y_pred_only_prov_all, digits=4))
+    print 'MTL_Func'
+    print metrics.classification_report(y_test_func_all, y_pred_func_all, digits=4)
+    print 'MTL_Prov'
+    print metrics.classification_report(y_test_prov_all, y_pred_prov_all, digits=4)
+    print 'Plain_Func'
+    print metrics.classification_report(y_test_only_func_all, y_pred_only_func_all, digits=4)
+    print 'Plain_Prov'
+    print metrics.classification_report(y_test_only_prov_all, y_pred_only_prov_all, digits=4)
 
     # ans += [metrics.precision_score(y_test, y_pred, average='weighted'),
     #         metrics.recall_score(y_test, y_pred, average='weighted'),
